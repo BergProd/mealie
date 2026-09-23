@@ -15,11 +15,12 @@ from mealie.core.config import get_app_settings
 from mealie.core.dependencies import get_auth_token, get_current_user
 from mealie.core.exceptions import MissingClaimException, UserLockedOut
 from mealie.core.security.security import get_auth_provider
+from mealie.core.security.zpace_access import ZPACE_COOKIE_NAME, exchange_zpace_access_for_mealie_token
 from mealie.db.db_setup import generate_session
 from mealie.lang import get_locale_provider
 from mealie.routes._base.routers import UserAPIRouter
 from mealie.schema.user import PrivateUser
-from mealie.schema.user.auth import CredentialsRequestForm, NativeOIDCTokenRequest, OIDCNativeConfig
+from mealie.schema.user.auth import NativeOIDCTokenRequest, OIDCNativeConfig
 
 from .auth_cache import AuthCache
 
@@ -131,35 +132,31 @@ class MealieAuthToken(BaseModel):
 
 
 @public_router.post("/token")
-def get_token(
+def get_token():
+    # Zpace is the only sign-in path; Mealie password login is disabled.
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Password login is disabled")
+
+
+@public_router.get("/zpace")
+def zpace_auth(
     request: Request,
     response: Response,
-    data: CredentialsRequestForm = Depends(),
     session: Session = Depends(generate_session),
 ):
-    if "x-forwarded-for" in request.headers:
-        ip = request.headers["x-forwarded-for"]
-        if "," in ip:  # if there are multiple IPs, the first one is canonically the true client
-            ip = str(ip.split(",")[0])
-    else:
-        # request.client should never be null, except sometimes during testing
-        ip = request.client.host if request.client else "unknown"
+    """Exchange the Zpace ``zpace_access`` cookie for a Mealie session token.
 
-    try:
-        auth_provider = get_auth_provider(session, data)
-        auth = auth_provider.authenticate()
-    except UserLockedOut as e:
-        logger.error(f"User is locked out from {ip}")
-        raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="User is locked out") from e
+    The SPA calls this on ``/login`` so the browser stores ``mealie.access_token``.
+    """
+    zpace_cookie = request.cookies.get(ZPACE_COOKIE_NAME) or ""
+    if not zpace_cookie:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing zpace_access cookie")
 
+    auth = exchange_zpace_access_for_mealie_token(session, zpace_cookie, remember_me=True)
     if not auth:
-        logger.error(f"Incorrect username or password from {ip}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid zpace_access cookie")
 
     access_token, duration = auth
-    set_session_cookie(response, request, access_token, duration, data.remember_me)
+    set_session_cookie(response, request, access_token, duration, remember_me=True)
     return MealieAuthToken.respond(access_token, duration)
 
 

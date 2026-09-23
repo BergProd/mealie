@@ -55,6 +55,7 @@ export const useMealieAuth = function () {
     signIn: auth.signIn,
     signOut: auth.signOut,
     getSession: auth.getSession,
+    setToken: auth.setToken,
     oauthSignIn,
   };
 };

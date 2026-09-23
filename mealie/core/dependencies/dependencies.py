@@ -76,17 +76,32 @@ async def get_public_group(group_slug: str = fastapi.Path(...), session=Depends(
 async def get_auth_token(
     request: Request,
     token: str | None = Depends(oauth2_scheme_soft_fail),
+    session: Session = Depends(generate_session),
 ) -> str:
     """The raw bearer token for this request, from the Authorization header or the session cookie.
 
     FastAPI caches dependency results per request, so routes that need the token itself as well as
     the user it resolves to share a single extraction.
-    """
-    if token is None and "mealie.access_token" in request.cookies:
-        # Try extract from cookie
-        return request.cookies.get("mealie.access_token", "")
 
-    return token or ""
+    When neither a bearer token nor ``mealie.access_token`` is present, a valid ``zpace_access``
+    cookie is exchanged for a Mealie JWT so ``get_current_user`` keeps working unchanged.
+    """
+    if token:
+        return token
+
+    mealie_cookie = request.cookies.get("mealie.access_token") or ""
+    if mealie_cookie:
+        return mealie_cookie
+
+    from mealie.core.security.zpace_access import ZPACE_COOKIE_NAME, exchange_zpace_access_for_mealie_token
+
+    zpace_cookie = request.cookies.get(ZPACE_COOKIE_NAME) or ""
+    if zpace_cookie:
+        exchanged = exchange_zpace_access_for_mealie_token(session, zpace_cookie)
+        if exchanged:
+            return exchanged[0]
+
+    return ""
 
 
 async def try_get_current_user(
