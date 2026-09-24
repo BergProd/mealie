@@ -13,12 +13,13 @@ import re
 from datetime import timedelta
 from logging import Logger
 
+from sqlalchemy import func, select
 from sqlalchemy.orm.session import Session
 
 from mealie.core import root_logger
 from mealie.core.config import get_app_settings
 from mealie.core.security.tokens import create_access_token
-from mealie.db.models.users.users import AuthMethod
+from mealie.db.models.users.users import AuthMethod, User
 from mealie.repos.all_repositories import get_repositories
 from mealie.schema.user import PrivateUser
 
@@ -70,14 +71,37 @@ def _username_for(sub: str, email: str) -> str:
     return (candidate or "zpace-user")[:50]
 
 
-def _ensure_mealie_user(session: Session, sub: str, email: str, full_name: str | None) -> PrivateUser | None:
-    """Look up by email; create into the existing default group/household if missing."""
+def _find_user_row(session: Session, sub: str, email: str) -> User | None:
+    by_sub = session.execute(select(User).where(User.zpace_sub == sub)).scalar_one_or_none()
+    if by_sub:
+        return by_sub
+    return session.execute(select(User).where(func.lower(User.email) == email.lower())).scalar_one_or_none()
+
+
+def ensure_mealie_user(
+    session: Session,
+    sub: str,
+    email: str,
+    full_name: str | None,
+    *,
+    admin: bool | None = None,
+) -> PrivateUser | None:
+    """Look up by LinkSubject, then email. Create into the existing default group when missing."""
     settings = get_app_settings()
     repos = get_repositories(session, group_id=None, household_id=None)
 
-    user = repos.users.get_one(email, "email", any_case=True)
-    if user:
-        return user
+    existing = _find_user_row(session, sub, email)
+    if existing:
+        changed = False
+        if not existing.zpace_sub:
+            existing.zpace_sub = sub
+            changed = True
+        if admin is not None and existing.admin != admin:
+            existing.admin = admin
+            changed = True
+        if changed:
+            session.commit()
+        return repos.users.get_one(existing.id)
 
     username = _username_for(sub, email)
     if repos.users.get_by_username(username):
@@ -93,12 +117,15 @@ def _ensure_mealie_user(session: Session, sub: str, email: str, full_name: str |
                 "password": "ZPACE",
                 "full_name": display_name,
                 "email": email,
-                "admin": False,
+                "admin": bool(admin),
                 "auth_method": AuthMethod.OIDC,
                 "group": settings.DEFAULT_GROUP,
                 "household": settings.DEFAULT_HOUSEHOLD,
             }
         )
+        created = session.get(User, user.id)
+        if created is not None:
+            created.zpace_sub = sub
         session.commit()
         logger.info("Created Mealie user for Zpace subject %s (%s)", sub, email)
         return user
@@ -125,7 +152,7 @@ def exchange_zpace_access_for_mealie_token(
 
     sub, email = identity
     name = payload.get("name") or payload.get("preferred_username")
-    user = _ensure_mealie_user(session, sub, email, name if isinstance(name, str) else None)
+    user = ensure_mealie_user(session, sub, email, name if isinstance(name, str) else None)
     if not user:
         return None
 

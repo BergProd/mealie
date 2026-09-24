@@ -15,6 +15,7 @@ from . import (
     unit_and_foods,
     users,
     validators,
+    zpace,
 )
 
 router = APIRouter(prefix="/api")
@@ -33,3 +34,4 @@ router.include_router(unit_and_foods.router)
 router.include_router(admin.router)
 router.include_router(validators.router)
 router.include_router(explore.router)
+router.include_router(zpace.router)

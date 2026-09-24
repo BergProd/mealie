@@ -175,6 +175,7 @@ class AppSettings(AppLoggingSettings):
 
     ALLOW_SIGNUP: bool = False
     ALLOW_PASSWORD_LOGIN: bool = True
+    ZPACE_DIRECTORY_SECRET: str = ""
 
     ALLOWED_IFRAME_HOSTS: str = ""
     """Comma-separated list of additional hostnames allowed as `<iframe>` sources in user content

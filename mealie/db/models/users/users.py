@@ -55,6 +55,7 @@ class User(SqlAlchemyBase, BaseMixins):
     full_name: FilterableColumn[str | None] = mapped_column(String, index=True)
     username: FilterableColumn[str | None] = mapped_column(String, index=True, unique=True)
     email: Mapped[str | None] = mapped_column(String, unique=True, index=True)
+    zpace_sub: Mapped[str | None] = mapped_column(String, unique=True, index=True, default=None)
     password: Mapped[str | None] = mapped_column(String)
     auth_method: Mapped[Enum[AuthMethod]] = mapped_column(Enum(AuthMethod), default=AuthMethod.MEALIE)
     admin: Mapped[bool | None] = mapped_column(Boolean, default=False)
