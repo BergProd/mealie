@@ -1,7 +1,7 @@
 import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm.session import Session
 
 from mealie.core.config import get_app_settings
@@ -45,12 +45,16 @@ def apply_baseline() -> None:
 
 
 @router.post("/directory", response_model=DirectoryUserOut, response_model_by_alias=True)
-def upsert_directory_user(
-    body: DirectoryUserIn,
+async def upsert_directory_user(
+    request: Request,
     session: Session = Depends(generate_session),
     directory_secret: str | None = Header(default=None, alias=DIRECTORY_SECRET_HEADER),
 ) -> DirectoryUserOut:
     _require_secret(directory_secret)
+    try:
+        body = DirectoryUserIn.model_validate(await request.json())
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid directory user") from exc
     identity = identity_from_zpace_payload({"sub": body.link_subject, "email": body.email, "name": body.name})
     if not identity:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="linkSubject is required")
